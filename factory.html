@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>منشر - المصنع</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app"></div>
+
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+    <script>
+        // Protect route
+        const session = Auth.requireRole('factory');
+
+        let overviewData = [];
+        let ordersData = [];
+        let damagedData = [];
+        let financialData = [];
+        let financialStats = { total: 0, reviewed: 0, pending: 0 };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            renderPage();
+            loadOverview();
+            loadOrders();
+            loadDamaged();
+            loadFinancial();
+
+            // Auto-refresh every 30 seconds
+            setInterval(() => {
+                loadOverview(true);
+                loadOrders(true);
+                loadDamaged(true);
+                loadFinancial(true);
+            }, 30000);
+        });
+
+        function renderPage() {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                ${renderHeader('المصنع', 'إدارة التصنيع والاحتياجات')}
+                
+                <div class="container">
+                    <div class="tabs">
+                        <button class="tab-btn active" onclick="activateTab('overview-tab', this)" id="btn-overview">احتياجات المصنع</button>
+                        <button class="tab-btn" onclick="activateTab('order-tab', this)" id="btn-order">طلب من المصنع</button>
+                        <button class="tab-btn" onclick="activateTab('delivery-tab', this)" id="btn-delivery">تسجيل دفعة جديدة</button>
+                        <button class="tab-btn" onclick="activateTab('damaged-tab', this)" id="btn-damaged">المرتجعات التالفة</button>
+                        <button class="tab-btn" onclick="activateTab('financial-tab', this)" id="btn-financial">مراجعة التحصيلات</button>
+                    </div>
+
+                    <div id="overview-tab" class="tab-content active" data-group="factory-tabs">
+                        <div id="overview-container" class="products-grid">
+                            ${renderLoadingOverlay()}
+                        </div>
+                    </div>
+
+                    <div id="order-tab" class="tab-content" data-group="factory-tabs">
+                        <div class="help-box">
+                            سجل هنا طلبات التصنيع الجديدة. الطلب ينقص من إجمالي الاحتياج المتبقي
+                        </div>
+                        <div class="card" style="margin-bottom: 20px;">
+                            <form onsubmit="handleOrderSubmit(event)">
+                                <div class="products-grid">
+                                    ${PRODUCTS.map((p, i) => `
+                                        <div class="form-group product-card">
+                                            <label class="form-label">${p}</label>
+                                            <input type="number" id="ord-qty-${i}" class="form-input" min="0" value="0" required>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">ملاحظات (اختياري)</label>
+                                    <textarea id="ord-notes" class="form-textarea"></textarea>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-block">تسجيل الطلب</button>
+                            </form>
+                        </div>
+                        <div class="card">
+                            <h3 class="card-title" style="margin-bottom: 15px;">سجل الطلبات</h3>
+                            <div id="orders-container">
+                                ${renderLoadingOverlay()}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="delivery-tab" class="tab-content" data-group="factory-tabs">
+                        <div class="help-box">
+                            بعد التسليم يتم تحديث المخزون والاحتياجات تلقائياً
+                        </div>
+                        <div class="card">
+                            <form onsubmit="handleDeliverySubmit(event)">
+                            <div class="products-grid">
+                                ${PRODUCTS.map((p, i) => `
+                                    <div class="form-group product-card">
+                                        <label class="form-label">${p}</label>
+                                        <input type="number" id="del-qty-${i}" class="form-input" min="0" value="0" required>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">ملاحظات (اختياري)</label>
+                                <textarea id="del-notes" class="form-textarea"></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">استلام الدفعة</button>
+                        </form>
+                        </div>
+                    </div>
+
+                    <div id="damaged-tab" class="tab-content" data-group="factory-tabs">
+                        <div class="card">
+                            <div class="card-header">
+                                <h2 class="card-title">المرتجعات التالفة</h2>
+                                <button class="btn btn-primary" onclick="handleClearDamaged()" style="padding: 5px 15px;">تم الاستبدال</button>
+                            </div>
+                            <div class="help-box">ملخص المنتجات التالفة القادمة من المناديب. بعد استبدالها من المصنع اضغط على "تم الاستبدال" لتصفيرها.</div>
+                            <div id="damaged-container" class="stats-grid">
+                                <!-- Damaged will be rendered here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="financial-tab" class="tab-content" data-group="factory-tabs">
+                        <div class="card">
+                            <div class="card-header">
+                                <h2 class="card-title">مراجعة التحصيلات</h2>
+                            </div>
+                            <div id="financial-stats" style="margin-bottom: 15px; font-weight: bold;"></div>
+                            <div id="financial-container">
+                                <!-- Data will go here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function activateTab(tabId, btnElement) {
+            switchTab(tabId, 'factory-tabs');
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btnElement.classList.add('active');
+        }
+
+        async function loadOverview(silent = false) {
+            const container = document.getElementById('overview-container');
+            if (!silent && container) {
+                container.innerHTML = renderLoadingOverlay();
+            }
+
+            const res = await (silent ? API.silentGet('factory_overview') : API.get('factory_overview'));
+            
+            if (res && res.ok) {
+                overviewData = res.data || [];
+                renderOverview();
+            } else if (!silent && container) {
+                container.innerHTML = renderEmpty('حدث خطأ أثناء تحميل الاحتياجات');
+            }
+        }
+
+        function renderOverview() {
+            const container = document.getElementById('overview-container');
+            if (!container) return;
+
+            if (overviewData.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد بيانات حالياً');
+                return;
+            }
+
+            container.innerHTML = overviewData.map(item => `
+                <div class="product-card">
+                    <h3 class="card-title" style="margin-bottom: 5px;">${item.product}</h3>
+                    <div style="font-size: 0.9em; color: #666; margin-bottom: 15px;">إجمالي مطلوب: ${item.originalNeed}</div>
+                    <div class="stats-grid">
+                        <div class="stat-card" style="border-right: 4px solid ${item.needToOrder < 0 ? '#dc2626' : '#2563eb'};">
+                            <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">إجمالي الاحتياج</div>
+                            <strong style="font-size: 1.2em; color: ${item.needToOrder < 0 ? '#dc2626' : '#2563eb'};">${formatNumber(item.needToOrder)}</strong>
+                        </div>
+                        <div class="stat-card" style="border-right: 4px solid ${item.pendingDelivery < 0 ? '#dc2626' : '#d97706'};">
+                            <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">تم الطلب من المصنع</div>
+                            <strong style="font-size: 1.2em; color: ${item.pendingDelivery < 0 ? '#dc2626' : '#d97706'};">${formatNumber(item.pendingDelivery)}</strong>
+                        </div>
+                        <div class="stat-card" style="border-right: 4px solid #059669;">
+                            <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">تم الاستلام</div>
+                            <strong style="font-size: 1.2em; color: #059669;">${formatNumber(item.totalReceived)}</strong>
+                        </div>
+                        <div class="stat-card" style="border-right: 4px solid ${item.remaining < 0 ? '#dc2626' : '#dc2626'};">
+                            <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">المتبقي</div>
+                            <strong style="font-size: 1.2em; color: #dc2626;">${formatNumber(item.remaining)}</strong>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function handleOrderSubmit(e) {
+            e.preventDefault();
+            const items = [];
+            PRODUCTS.forEach((p, i) => {
+                const qty = Number(document.getElementById('ord-qty-' + i).value);
+                if (qty > 0) items.push({ product: p, quantity: qty });
+            });
+            const notes = document.getElementById('ord-notes').value;
+
+            if (items.length === 0) {
+                showToast('يجب تحديد كمية لمنتج واحد على الأقل', 'error');
+                return;
+            }
+
+            showLoading();
+            const res = await API.post('factory_order', { items, notes });
+            hideLoading();
+
+            if (res && res.ok) {
+                showToast('تم تسجيل الطلب بنجاح', 'success');
+                e.target.reset();
+                loadOverview();
+                loadOrders();
+            } else {
+                showToast(res?.error || 'حدث خطأ أثناء التسجيل', 'error');
+            }
+        }
+
+        async function loadOrders(silent = false) {
+            const container = document.getElementById('orders-container');
+            if (!container) return;
+            if (!silent) {
+                container.innerHTML = renderLoadingOverlay();
+            }
+
+            const res = await (silent ? API.silentGet('factory_orders') : API.get('factory_orders'));
+            
+            if (res && res.ok) {
+                ordersData = res.data || [];
+                renderOrders();
+            } else if (!silent) {
+                container.innerHTML = renderEmpty('حدث خطأ أثناء تحميل الطلبات');
+            }
+        }
+
+        function renderOrders() {
+            const container = document.getElementById('orders-container');
+            if (!container) return;
+
+            if (ordersData.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد طلبات سابقة');
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>التاريخ</th>
+                                <th>المنتج</th>
+                                <th>الكمية</th>
+                                <th>ملاحظات</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${ordersData.map(order => `
+                                <tr>
+                                    <td>${order.date ? formatDate(order.date) : '-'}</td>
+                                    <td>
+                                        ${order.items 
+                                            ? order.items.map(i => i.product).join('<br>')
+                                            : (order.product || '-')}
+                                    </td>
+                                    <td>
+                                        ${order.items 
+                                            ? order.items.map(i => formatNumber(i.quantity)).join('<br>')
+                                            : formatNumber(order.quantity || 0)}
+                                    </td>
+                                    <td>${order.notes || '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        async function handleDeliverySubmit(e) {
+            e.preventDefault();
+            const items = [];
+            PRODUCTS.forEach((p, i) => {
+                const qty = Number(document.getElementById('del-qty-' + i).value);
+                if (qty > 0) items.push({ product: p, quantity: qty });
+            });
+            const notes = document.getElementById('del-notes').value;
+
+            if (items.length === 0) {
+                showToast('يجب تحديد كمية لمنتج واحد على الأقل', 'error');
+                return;
+            }
+
+            showLoading();
+            const res = await API.post('factory_delivery', { items, notes });
+            hideLoading();
+
+            if (res && res.ok) {
+                showToast('تم تسجيل الدفعة بنجاح', 'success');
+                e.target.reset();
+                loadOverview();
+            } else {
+                showToast(res?.error || 'حدث خطأ أثناء التسجيل', 'error');
+            }
+        }
+
+        async function handleClearDamaged() {
+            if (!confirm('هل أنت متأكد من أنه تم استبدال جميع التوالف؟ سيتم تصفير الأرقام.')) return;
+            showLoading();
+            const res = await API.post('clear_damaged', {});
+            hideLoading();
+            if (res.ok) {
+                showToast(res.message);
+                loadDamaged();
+            } else {
+                showToast(res.error || 'حدث خطأ', 'error');
+            }
+        }
+
+        async function loadDamaged(silent = false) {
+            const container = document.getElementById('damaged-container');
+            if (!silent && container) {
+                container.innerHTML = renderLoadingOverlay();
+            }
+
+            const res = await (silent ? API.silentGet('damaged_summary') : API.get('damaged_summary'));
+            
+            if (res && res.ok) {
+                damagedData = res.data || [];
+                renderDamaged();
+            } else if (!silent && container) {
+                container.innerHTML = renderEmpty('حدث خطأ أثناء تحميل المرتجعات التالفة');
+            }
+        }
+
+        function renderDamaged() {
+            const container = document.getElementById('damaged-container');
+            if (!container) return;
+
+            if (damagedData.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد مرتجعات تالفة');
+                return;
+            }
+
+            container.innerHTML = damagedData.map(item => `
+                <div class="card">
+                    <h3 class="card-title text-center" style="margin-bottom: 15px;">${item.product}</h3>
+                    <div style="font-size: 32px; font-weight: bold; text-align: center; color: #dc3545;">
+                        ${formatNumber(item.quantity)}
+                    </div>
+                    <div class="text-center text-muted" style="margin-top: 5px;">
+                        قطعة تالفة
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function loadFinancial(silent = false) {
+            const container = document.getElementById('financial-container');
+            if (!silent && container) {
+                container.innerHTML = renderLoadingOverlay();
+            }
+
+            const res = await (silent ? API.silentGet('financial_pending_factory') : API.get('financial_pending_factory'));
+            
+            if (res && res.ok) {
+                financialData = res.data || [];
+                financialStats = res.stats || { total: 0, reviewed: 0, pending: 0 };
+                renderFinancial();
+            } else if (!silent && container) {
+                container.innerHTML = renderEmpty('حدث خطأ أثناء تحميل بيانات التحصيلات');
+            }
+        }
+
+        function renderFinancial() {
+            const container = document.getElementById('financial-container');
+            const statsContainer = document.getElementById('financial-stats');
+            if (!container) return;
+
+            if (statsContainer) {
+                statsContainer.innerHTML = `تم مراجعة ${financialStats.reviewed} طلبات | معلق ${financialStats.pending} طلبات`;
+            }
+
+            if (financialData.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد تحصيلات معلقة');
+                return;
+            }
+
+            container.innerHTML = financialData.map((installerGroup, idx) => `
+                <div class="card" style="margin-bottom: 15px; border: 1px solid #eee;">
+                    <div class="card-header" style="cursor: pointer; background: #f8f9fa; padding: 10px;" onclick="toggleInstallerCard('factory-inst-${idx}')">
+                        <h3 style="margin: 0;">${installerGroup.installer} - ${formatNumber(installerGroup.totalAmount)} ريال (${installerGroup.orders.length} طلبات)</h3>
+                    </div>
+                    <div id="factory-inst-${idx}" style="display: none; padding: 10px;">
+                        <div class="table-wrapper">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th><input type="checkbox" onchange="toggleAllCheckboxes('chk-group-fac-${idx}', this.checked)"></th>
+                                        <th>رقم الطلب</th>
+                                        <th>المبلغ</th>
+                                        <th>طريقة الدفع</th>
+                                        <th>النوع</th>
+                                        <th>مراجعة التوزيع</th>
+                                        <th>تاريخ الطلب</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${installerGroup.orders.map(order => `
+                                        <tr>
+                                            <td><input type="checkbox" class="chk-group-fac-${idx}" value="${order.id}"></td>
+                                            <td>${order.orderNumber || '-'}</td>
+                                            <td>${formatNumber(order.amount)}</td>
+                                            <td><span class="badge" style="background: #17a2b8; color: white;">${order.payMethod || '-'}</span></td>
+                                            <td><span class="badge" style="background: #6c757d; color: white;">${order.type || '-'}</span></td>
+                                            <td>${order.distReviewer ? order.distReviewer + '<br><small>' + formatDate(order.distDate) + '</small>' : '-'}</td>
+                                            <td>${order.date ? formatDate(order.date) : '-'}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        <button class="btn btn-primary" style="margin-top: 10px;" onclick="confirmFinancialFactory('chk-group-fac-${idx}')">تأكيد المحدد</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function toggleInstallerCard(id) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.style.display = el.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+
+        function toggleAllCheckboxes(className, isChecked) {
+            document.querySelectorAll('.' + className).forEach(chk => chk.checked = isChecked);
+        }
+
+        async function confirmFinancialFactory(className) {
+            const checkboxes = document.querySelectorAll('.' + className + ':checked');
+            const ids = Array.from(checkboxes).map(c => c.value);
+            
+            if (ids.length === 0) {
+                showToast('يرجى تحديد طلب واحد على الأقل', 'error');
+                return;
+            }
+
+            if (!confirm('هل أنت متأكد من تأكيد الطلبات المحددة؟')) return;
+
+            showLoading();
+            const res = await API.post('confirm_financial_factory', { ids });
+            hideLoading();
+
+            if (res && res.ok) {
+                showToast('تم التأكيد بنجاح', 'success');
+                loadFinancial();
+            } else {
+                showToast(res?.error || 'حدث خطأ أثناء التأكيد', 'error');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>منشر - تسجيل الدخول</title>
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="login-wrapper">
+    <div class="login-card">
+      <div class="login-header">
+        <img src="assets/logo1.png" alt="منشر" style="height: 80px; margin-bottom: 15px; object-fit: contain;">
+        <h1>نظام منشر</h1>
+        <p>نظام إدارة المخزون والتوزيع</p>
+      </div>
+
+      <div class="login-body">
+        <form id="loginForm">
+          <div class="form-group">
+            <label class="form-label">رمز الدخول</label>
+            <input type="text" id="username" class="form-input" placeholder="أدخل الرمز السري للقسم"
+                   required autocomplete="username" autofocus>
+          </div>
+
+          <div id="errorMsg" style="display:none; color:var(--danger); font-size:0.85rem; text-align:center; margin-bottom:16px; font-weight:600;"></div>
+
+          <button type="submit" id="loginBtn" class="btn btn-primary btn-block" style="font-size:1.05rem; padding:14px;">
+            تسجيل الدخول
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">جاري تسجيل الدخول...</div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/utils.js"></script>
+  <script>
+    // لو مسجل دخول بالفعل → حوّل لصفحته
+    const existing = Auth.getSession();
+    if (existing) {
+      window.location.href = Auth.getPageForRole(existing.role);
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById('errorMsg');
+      errorEl.style.display = 'none';
+
+      const username = document.getElementById('username').value.trim();
+
+      if (!username) {
+        errorEl.textContent = 'يرجى إدخال اسم المستخدم';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('loginBtn');
+      btn.disabled = true;
+      btn.textContent = 'جاري الدخول...';
+      showLoading();
+
+      try {
+        const result = await API.post('login', { username });
+
+        if (result.ok && result.data) {
+          Auth.save(result.data);
+          showToast('مرحباً ' + result.data.displayName);
+          setTimeout(() => {
+            window.location.href = Auth.getPageForRole(result.data.role);
+          }, 500);
+        } else {
+          errorEl.textContent = result.error || 'خطأ في تسجيل الدخول';
+          errorEl.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'تسجيل الدخول';
+        }
+      } catch (err) {
+        errorEl.textContent = 'خطأ في الاتصال بالسيرفر';
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'تسجيل الدخول';
+      } finally {
+        hideLoading();
+      }
+    });
+  </script>
+</body>
+</html>
