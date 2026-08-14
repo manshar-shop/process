@@ -1,0 +1,1293 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لوحة تحكم الإدارة - منشر</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app"></div>
+
+    <script src="js/utils.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script>
+        const session = Auth.requireRole('admin');
+
+        function renderApp() {
+            const html = `
+                ${renderHeader('لوحة تحكم الإدارة', 'إدارة المخزون والمندوبين والمصنع')}
+                <main class="container">
+                    <div class="tabs">
+                        <button class="tab-btn active" onclick="switchTab('dashboard-tab', 'admin-tabs'); loadDashboard()">لوحة التحكم</button>
+                        <button class="tab-btn" onclick="switchTab('region-custody-tab', 'admin-tabs'); loadRegionCustody()">لوحة عهد المناطق</button>
+                        <button class="tab-btn" onclick="switchTab('inventory-reg-tab', 'admin-tabs'); loadInventoryAdjustment()">تعديل المخزون</button>
+                        <button class="tab-btn" onclick="switchTab('needs-tab', 'admin-tabs'); loadNeeds()">تسجيل الاحتياجات</button>
+                        <button class="tab-btn" onclick="switchTab('inventory-tab', 'admin-tabs'); loadInventory()">متابعة المخزون</button>
+                        <button class="tab-btn" onclick="switchTab('delegates-tab', 'admin-tabs'); loadDelegates()">متابعة الفرز</button>
+                        <button class="tab-btn" onclick="switchTab('delegate-report-tab', 'admin-tabs'); loadDelegateReportTab()">تقارير المناديب</button>
+                        <button class="tab-btn" onclick="switchTab('logs-tab', 'admin-tabs'); loadLogs()">سجل العمليات</button>
+                        <button class="tab-btn" onclick="switchTab('settings-tab', 'admin-tabs'); loadSettings()">إعدادات النظام</button>
+                        <button class="tab-btn" onclick="switchTab('assignment-tab', 'admin-tabs'); loadAssignments()">إسناد طلبية</button>
+                        <button class="tab-btn" onclick="switchTab('financial-tracking-tab', 'admin-tabs'); loadFinancialTracking()">متابعة مالية</button>
+                        <button class="tab-btn" onclick="switchTab('extra-stats-tab', 'admin-tabs'); loadExtraStats()">إحصائيات العهدة</button>
+                    </div>
+
+                    <div id="dashboard-tab" class="tab-content admin-tabs active">
+                        <div class="help-box">هذه اللوحة تعرض ملخص شامل لحالة المخزون والعمليات</div>
+                        <div style="margin-bottom: 15px;">
+                            <button class="btn btn-primary" onclick="loadDashboard()">تحديث البيانات</button>
+                        </div>
+                        <div id="dashboard-content"></div>
+                    </div>
+
+                    <div id="region-custody-tab" class="tab-content admin-tabs">
+                        <div class="section-divider">
+                            <span class="icon">📍</span>
+                            متابعة عُهد المناطق
+                        </div>
+                        <div style="margin-bottom: 15px; display: flex; gap: 10px;">
+                            <button class="btn btn-primary" onclick="loadRegionCustody()">تحديث البيانات</button>
+                        </div>
+                        <div id="region-custody-content"></div>
+                        <div class="section-divider">استهلاك المناديب من العهدة المركزية للمنطقة</div>
+                        <div id="courier-region-usage-content"></div>
+                    </div>
+
+                    <div id="inventory-reg-tab" class="tab-content admin-tabs">
+                        <div class="help-box">عدل رصيد المخزون الأساسي لكل الأنواع في نفس الوقت. سيقوم النظام بضبط الفروقات تلقائياً.</div>
+                        <div class="card">
+                            <h2 class="card-title">تعديل المخزون الأساسي</h2>
+                            <form id="update-inventory-form" onsubmit="handleUpdateInventory(event)">
+                                <div class="products-grid" id="inv-adj-container">
+                                    ${PRODUCTS.map((p, i) => `
+                                        <div class="form-group product-card">
+                                            <label class="form-label">${p}</label>
+                                            <input type="number" id="inv-adj-${i}" class="form-input" value="0" required>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                <div class="form-group" style="margin-top: 15px;">
+                                    <label class="form-label">سبب التعديل</label>
+                                    <textarea id="inv-adj-reason" class="form-textarea" placeholder="اذكر سبب التعديل (اختياري)"></textarea>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-block">حفظ التعديلات</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div id="needs-tab" class="tab-content admin-tabs">
+                        <div class="help-box">تسجيل احتياجات المصنع لإرسالها للإنتاج</div>
+                        <div class="card" style="margin-bottom: 20px;">
+                            <h2 class="card-title">تسجيل احتياج جديد</h2>
+                            <form id="create-needs-form" onsubmit="handleCreateNeeds(event)">
+                                <div class="products-grid">
+                                    ${PRODUCTS.map((p, i) => `
+                                        <div class="form-group product-card">
+                                            <label class="form-label">${p}</label>
+                                            <input type="number" class="form-input need-input" data-product="${p}" min="0" value="0" required>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-block" style="margin-top: 15px;">تسجيل الاحتياجات</button>
+                            </form>
+                        </div>
+
+                        <div class="section-divider">
+                            <span class="icon">📊</span>
+                            سجل الاحتياجات
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <button class="btn btn-primary" onclick="loadNeeds()">تحديث البيانات</button>
+                        </div>
+                        <div id="needs-overview-container" class="table-wrapper">
+                            <!-- Needs overview will load here -->
+                        </div>
+                    </div>
+
+                    <div id="inventory-tab" class="tab-content admin-tabs">
+                        <div class="help-box">تفاصيل حركة المخزون لكل منتج</div>
+                        <div class="card">
+                            <div class="table-wrapper" id="inventory-content"></div>
+                        </div>
+                    </div>
+
+                    <div id="delegates-tab" class="tab-content admin-tabs">
+                        <div class="help-box">عرض عهدة كل مندوب</div>
+                        <div class="card">
+                            <div class="table-wrapper" id="delegates-content"></div>
+                        </div>
+                    </div>
+
+                    <div id="delegate-report-tab" class="tab-content admin-tabs">
+                        <div class="help-box">متابعة طلبات الدفع عند الاستلام والعهد الإضافية لكل مندوب</div>
+                        <div class="card" style="margin-bottom: 20px;">
+                            <div class="form-group" style="max-width: 400px;">
+                                <label>اختر المندوب:</label>
+                                <select id="report-delegate-select" onchange="renderDelegateReport(this.value)" class="form-input">
+                                    <option value="">جاري التحميل...</option>
+                                </select>
+                                <button onclick="printDelegateReport()" class="btn btn-primary" style="margin-top: 15px;">طباعة التقرير (PDF)</button>
+                            </div>
+                        </div>
+                        <div id="delegate-report-content">
+                            <!-- Report content will load here -->
+                        </div>
+                    </div>
+
+                    <div id="logs-tab" class="tab-content admin-tabs">
+                        <div class="card">
+                            <div class="table-wrapper" id="logs-content"></div>
+                        </div>
+                    </div>
+
+                    <div id="settings-tab" class="tab-content admin-tabs">
+                        <div class="help-box">إدارة الأقسام وإضافة المندوبين للنظام</div>
+                        
+                        <div class="card" style="margin-bottom: 20px;">
+                            <h2 class="card-title">إدارة المناطق</h2>
+                            <form onsubmit="handleAddRegion(event)" style="margin-bottom: 15px;">
+                                <div class="products-grid">
+                                    <div class="form-group">
+                                        <label class="form-label">اسم المنطقة الجديدة</label>
+                                        <input type="text" id="new-region-name" class="form-input" required>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary" style="width: 100%; max-width: 200px; margin: 15px auto 0; display: block;">إضافة منطقة</button>
+                            </form>
+                            <div id="regions-list"></div>
+                        </div>
+
+                        <div class="card" style="margin-bottom: 20px;">
+                            <h2 class="card-title">إضافة مندوب جديد</h2>
+                            <form id="add-delegate-form" onsubmit="handleAddDelegate(event)">
+                                <div class="products-grid">
+                                    <div class="form-group">
+                                        <label class="form-label">اسم المندوب</label>
+                                        <input type="text" id="new-delegate-name" class="form-input" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">المنطقة</label>
+                                        <select id="new-delegate-region" class="form-select" required>
+                                            <option value="">-- اختر المنطقة --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary" style="width: 100%; max-width: 200px; margin: 15px auto 0; display: block;">إضافة المندوب</button>
+                            </form>
+                            <div id="delegates-list" style="margin-top: 15px;"></div>
+                        </div>
+
+                        <div class="card">
+                            <h2 class="card-title">إدارة كلمات المرور للأقسام</h2>
+                            <div class="table-wrapper" id="users-passwords-content">
+                                <!-- Users list will load here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="assignment-tab" class="tab-content admin-tabs">
+                        <div class="help-box">سجّل طلبية جديدة لسحب كميات من المخزون. أدخل رقم الطلبية والكميات المطلوبة من كل نوع</div>
+                        <div class="card">
+                            <h2 class="card-title">إسناد طلبية جديدة</h2>
+                            <form id="assignment-form" onsubmit="handleOrderAssignment(event)">
+                                <div class="form-group">
+                                    <label class="form-label">رقم الطلبية</label>
+                                    <input type="text" id="assignment-order-num" class="form-input" required placeholder="أدخل رقم الطلبية">
+                                </div>
+                                <div class="products-grid">
+                                    ${PRODUCTS.filter(p => p !== 'بارات الومنيوم').map((p, i) => `
+                                        <div class="form-group product-card">
+                                            <label class="form-label">${p}</label>
+                                            <input type="number" id="assign-qty-${i}" class="form-input" min="0" value="0" required>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">ملاحظات (السحب تبع إيه)</label>
+                                    <textarea id="assignment-notes" class="form-textarea" placeholder="مثال: سحب لتوزيع منطقة الرياض"></textarea>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-block">تأكيد إسناد الطلبية</button>
+                            </form>
+                        </div>
+                        <div class="card" style="margin-top: 20px;">
+                            <h2 class="card-title">سجل الطلبيات المسندة</h2>
+                            <div id="assignments-history"></div>
+                        </div>
+                    </div>
+
+                    <div id="financial-tracking-tab" class="tab-content admin-tabs">
+                        <div class="help-box">متابعة مالية وحالة الفرز والمصنع</div>
+                        <div class="card" style="margin-bottom: 20px;">
+                            <div class="form-group" style="max-width: 400px;">
+                                <label>تصفية باسم المندوب:</label>
+                                <select id="financial-filter" onchange="filterFinancialData()" class="form-input">
+                                    <option value="">-- كل المناديب --</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="financial-tracking-content"></div>
+                    </div>
+
+                    <div id="extra-stats-tab" class="tab-content admin-tabs">
+                        <div class="help-box">إحصائيات العهدة الإضافية</div>
+                        <div id="extra-stats-content"></div>
+                    </div>
+                </main>
+            `;
+            document.getElementById('app').innerHTML = html;
+            loadDashboard();
+        }
+
+        async function loadDashboard() {
+            const container = document.getElementById('dashboard-content');
+            container.innerHTML = renderLoadingOverlay();
+            const res = await API.get('dashboard', {role: 'admin'});
+            if (!res.ok) {
+                container.innerHTML = `<div class="help-box" style="background-color: #ffebee; color: #c62828;">${res.error}</div>`;
+                return;
+            }
+
+            const data = res.data;
+            const inventory = data.inventory || {};
+            let totalInventory = 0;
+            const productsHtml = PRODUCTS.map(p => {
+                const bal = inventory[p] || 0;
+                totalInventory += bal;
+                const isNegative = bal < 0;
+                return `
+                    <div class="product-card">
+                        <h3>${p}</h3>
+                        <p style="font-size: 24px; font-weight: bold; margin-top: 10px; ${isNegative ? 'color: #dc2626;' : ''}">${formatNumber(bal)}</p>
+                    </div>
+                `;
+            }).join('');
+
+            const statsHtml = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-title">المرتجع</div>
+                        <div class="stat-value">${formatNumber(data.totalReturned || 0)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-title">التالف</div>
+                        <div class="stat-value">${formatNumber(data.totalDamaged || 0)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-title">التحصيل</div>
+                        <div class="stat-value">${formatNumber(data.totalCollected || 0)}</div>
+                    </div>
+                </div>
+                
+                <h2 style="margin: 20px 0 10px;">رصيد المنتجات</h2>
+                <div class="products-grid">
+                    ${productsHtml}
+                </div>
+            `;
+
+            const overviewRes = await API.get('factory_overview');
+            let needsHtml = '';
+            
+            if (overviewRes && overviewRes.ok && overviewRes.data && overviewRes.data.length > 0) {
+                const overviewCards = overviewRes.data.map(item => `
+                    <div class="product-card" style="margin-bottom: 20px;">
+                        <h3 class="card-title" style="margin-bottom: 5px;">${item.product}</h3>
+                        <div style="font-size: 0.9em; color: #666; margin-bottom: 15px;">إجمالي مطلوب: ${item.originalNeed}</div>
+                        <div class="stats-grid">
+                            <div class="stat-card" style="border-right: 4px solid #2563eb;">
+                                <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">إجمالي الاحتياج</div>
+                                <strong style="font-size: 1.2em; color: ${item.needToOrder < 0 ? '#dc2626' : '#2563eb'};">${formatNumber(item.needToOrder)}</strong>
+                            </div>
+                            <div class="stat-card" style="border-right: 4px solid #d97706;">
+                                <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">تم الطلب من المصنع</div>
+                                <strong style="font-size: 1.2em; color: ${item.pendingDelivery < 0 ? '#dc2626' : '#d97706'};">${formatNumber(item.pendingDelivery)}</strong>
+                            </div>
+                            <div class="stat-card" style="border-right: 4px solid #059669;">
+                                <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">تم الاستلام</div>
+                                <strong style="font-size: 1.2em; color: #059669;">${formatNumber(item.totalReceived)}</strong>
+                            </div>
+                            <div class="stat-card" style="border-right: 4px solid #dc2626;">
+                                <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">المتبقي</div>
+                                <strong style="font-size: 1.2em; color: ${item.remaining < 0 ? '#dc2626' : '#dc2626'};">${formatNumber(item.remaining)}</strong>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+                needsHtml = `
+                    <h2 style="margin: 20px 0 10px;">احتياجات المصنع الحالية</h2>
+                    <div class="products-grid">
+                        ${overviewCards}
+                    </div>
+                `;
+            } else {
+                needsHtml = `
+                    <h2 style="margin: 20px 0 10px;">احتياجات المصنع الحالية</h2>
+                    <div class="help-box">لا توجد احتياجات مسجلة حالياً</div>
+                `;
+            }
+
+            container.innerHTML = statsHtml + needsHtml;
+        }
+
+        async function handleUpdateInventory(e) {
+            e.preventDefault();
+            const items = [];
+            PRODUCTS.forEach((p, i) => {
+                const newBalance = Number(document.getElementById('inv-adj-' + i).value);
+                items.push({ product: p, newBalance: newBalance });
+            });
+
+            const reason = document.getElementById('inv-adj-reason')?.value || '';
+
+            showLoading();
+            const res = await API.post('update_inventory', { items, reason });
+            hideLoading();
+
+            if (res && res.ok) {
+                showToast('تم حفظ التعديلات بنجاح', 'success');
+                loadDashboard();
+            } else {
+                showToast(res?.error || 'حدث خطأ أثناء التعديل', 'error');
+            }
+        }
+
+        async function loadInventoryAdjustment() {
+            showLoading();
+            const res = await API.get('inventory');
+            hideLoading();
+            if (res && res.ok && res.data) {
+                PRODUCTS.forEach((p, i) => {
+                    const item = res.data.find(d => d.product === p);
+                    if (item) {
+                        document.getElementById('inv-adj-' + i).value = item.balance;
+                    }
+                });
+            }
+        }
+
+        async function handleCreateNeeds(e) {
+            e.preventDefault();
+            const items = [];
+            document.querySelectorAll('.need-input').forEach(input => {
+                const qty = parseInt(input.value, 10);
+                if (qty > 0) {
+                    items.push({product: input.dataset.product, quantity: qty});
+                }
+            });
+
+            if (items.length === 0) {
+                showToast('الرجاء إدخال كمية لمنتج واحد على الأقل', 'error');
+                return;
+            }
+
+            showLoading();
+            const res = await API.post('create_need', {items});
+            hideLoading();
+
+            if (res.ok) {
+                showToast('تم تسجيل الاحتياجات بنجاح');
+                document.querySelectorAll('.need-input').forEach(inp => inp.value = 0);
+                loadNeeds();
+            } else {
+                showToast(res.error || 'حدث خطأ', 'error');
+            }
+        }
+
+        async function loadNeeds() {
+            const container = document.getElementById('needs-overview-container');
+            container.innerHTML = renderLoadingOverlay();
+            const res = await API.get('factory_needs');
+            
+            if (!res.ok) {
+                container.innerHTML = `<div style="color: red;">${res.error}</div>`;
+                return;
+            }
+
+            if (!res.data || res.data.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد احتياجات مسجلة حالياً');
+                return;
+            }
+
+            const html = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>التاريخ</th>
+                            <th>المنتج</th>
+                            <th>المطلوب</th>
+                            <th>المستلم</th>
+                            <th>المتبقي</th>
+                            <th>الحالة</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${res.data.map(n => `
+                            <tr>
+                                <td>${formatDate(n.date || n.timestamp)}</td>
+                                <td>${n.product}</td>
+                                <td>${n.required}</td>
+                                <td>${n.received}</td>
+                                <td>${n.remaining}</td>
+                                <td><span class="badge">${n.status}</span></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            
+            container.innerHTML = html;
+        }
+
+        async function loadInventory() {
+            const container = document.getElementById('inventory-content');
+            container.innerHTML = renderLoadingOverlay();
+            const res = await API.get('inventory');
+            
+            if (!res.ok) {
+                container.innerHTML = `<div style="color: red;">${res.error}</div>`;
+                return;
+            }
+
+            if (!res.data || res.data.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد بيانات للمخزون');
+                return;
+            }
+
+            const html = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>المنتج</th>
+                            <th>الوارد</th>
+                            <th>المرتجع</th>
+                            <th>المصروف</th>
+                            <th>التالف</th>
+                            <th>الرصيد</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${res.data.map(i => `
+                            <tr>
+                                <td><strong>${i.product}</strong></td>
+                                <td>${i.totalIn || 0}</td>
+                                <td>${i.totalReturn || 0}</td>
+                                <td>${i.totalOut || 0}</td>
+                                <td>${i.totalDamaged || 0}</td>
+                                <td style="font-weight:bold;">${i.balance || 0}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            container.innerHTML = html;
+        }
+
+        async function loadDelegates() {
+            const container = document.getElementById('delegates-content');
+            container.innerHTML = renderLoadingOverlay();
+            const res = await API.get('all_delegates');
+            
+            if (!res.ok) {
+                container.innerHTML = `<div style="color: red;">${res.error}</div>`;
+                return;
+            }
+
+            if (!res.data || res.data.length === 0) {
+                container.innerHTML = renderEmpty('لا يوجد مندوبين');
+                return;
+            }
+
+            let html = '';
+            res.data.forEach(del => {
+                html += `
+                    <h3 style="margin: 20px 0 10px; color: var(--primary);">${del.delegate} <small style="color:#666;">(${del.region})</small></h3>
+                    <table class="data-table" style="margin-bottom: 20px;">
+                        <thead>
+                            <tr>
+                                <th>المنتج</th>
+                                <th>رصيد الطلبات</th>
+                                <th>الرصيد الإضافي</th>
+                                <th>إجمالي الرصيد</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${del.balances && del.balances.length > 0 ? del.balances.map(b => `
+                                <tr>
+                                    <td>${b.product}</td>
+                                    <td>${b.orderBalance || 0}</td>
+                                    <td>${b.extraBalance || 0}</td>
+                                    <td style="font-weight:bold;">${b.totalBalance || 0}</td>
+                                </tr>
+                            `).join('') : '<tr><td colspan="4" style="text-align:center;">لا يوجد رصيد</td></tr>'}
+                        </tbody>
+                    </table>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        async function loadLogs() {
+            const container = document.getElementById('logs-content');
+            container.innerHTML = renderLoadingOverlay();
+            const res = await API.get('transactions', {limit: '200'});
+            
+            if (!res.ok) {
+                container.innerHTML = `<div style="color: red;">${res.error}</div>`;
+                return;
+            }
+
+            if (!res.data || res.data.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد عمليات');
+                return;
+            }
+
+            const html = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>التاريخ</th>
+                            <th>نوع الحركة</th>
+                            <th>المنتج</th>
+                            <th>الكمية</th>
+                            <th>من</th>
+                            <th>إلى</th>
+                            <th>رقم الطلب</th>
+                            <th>المستخدم</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${res.data.map(t => `
+                            <tr>
+                                <td>${formatDate(t.date || t.timestamp)}</td>
+                                <td><span class="badge">${t.type}</span></td>
+                                <td>${t.product || '-'}</td>
+                                <td>${t.qty || '-'}</td>
+                                <td>${t.from || '-'}</td>
+                                <td>${t.to || '-'}</td>
+                                <td>${t.orderNumber || '-'}</td>
+                                <td>${t.user || '-'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            container.innerHTML = html;
+        }
+
+        async function loadDelegateReportTab() {
+            const select = document.getElementById('report-delegate-select');
+            select.innerHTML = '<option value="">جاري التحميل...</option>';
+            document.getElementById('delegate-report-content').innerHTML = '';
+            
+            const res = await API.get('all_delegates');
+            if (res.ok && res.data) {
+                select.innerHTML = '<option value="">اختر المندوب...</option>';
+                res.data.forEach(del => {
+                    select.innerHTML += `<option value="${del.delegate}">${del.delegate} (${del.region})</option>`;
+                });
+            } else {
+                select.innerHTML = '<option value="">خطأ في التحميل</option>';
+            }
+        }
+
+        async function renderDelegateReport(delegate) {
+            const container = document.getElementById('delegate-report-content');
+            if (!delegate) {
+                container.innerHTML = '';
+                return;
+            }
+            container.innerHTML = renderLoadingOverlay();
+            
+            const res = await API.get('delegate_report', { delegate });
+            if (!res.ok) {
+                container.innerHTML = `<div class="help-box" style="background-color: #ffebee; color: #c62828;">${res.error}</div>`;
+                return;
+            }
+            
+            const data = res.data;
+            const codCollections = data.collections.filter(c => c.orderNumber && c.orderNumber !== 'إضافي');
+            const extraCollections = data.collections.filter(c => c.orderNumber === 'إضافي');
+            
+            let totalCodCash = 0, totalCodTransfer = 0;
+            codCollections.forEach(c => {
+                if (c.method === 'كاش') totalCodCash += c.amount;
+                else totalCodTransfer += c.amount;
+            });
+            
+            let totalExtraCash = 0, totalExtraTransfer = 0;
+            extraCollections.forEach(c => {
+                if (c.method === 'كاش') totalExtraCash += c.amount;
+                else totalExtraTransfer += c.amount;
+            });
+
+            let extraBalHtml = '';
+            data.balances.forEach(b => {
+                if (b.extraBalance > 0) {
+                    extraBalHtml += `<div class="product-card" style="padding: 15px;">
+                        <h4>${b.product}</h4>
+                        <p style="font-size: 20px; font-weight: bold; margin-top: 10px;">${b.extraBalance}</p>
+                    </div>`;
+                }
+            });
+            if (!extraBalHtml) extraBalHtml = '<p style="padding: 15px;">لا توجد عهدة إضافية حالياً</p>';
+
+            const html = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-title">طلبات دفع عند الاستلام</div>
+                        <div class="stat-value">${codCollections.length}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-title">إجمالي الكاش (طلبات)</div>
+                        <div class="stat-value">${formatNumber(totalCodCash)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-title">إجمالي التحويل (طلبات)</div>
+                        <div class="stat-value">${formatNumber(totalCodTransfer)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-title">منشر إضافي (مُباع)</div>
+                        <div class="stat-value">${data.extraInstalled.reduce((sum, t) => sum + t.qty, 0)}</div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 20px;">
+                    <h3 class="card-title">رصيد العهدة الإضافية المتبقي (في السيارة)</h3>
+                    <div class="products-grid">
+                        ${extraBalHtml}
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 20px;">
+                    <h3 class="card-title">تفاصيل تحصيلات الدفع عند الاستلام</h3>
+                    ${codCollections.length > 0 ? `
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>التاريخ</th><th>رقم الطلب</th><th>المبلغ</th><th>الطريقة</th></tr>
+                            </thead>
+                            <tbody>
+                                ${codCollections.map(c => `
+                                    <tr>
+                                        <td>${formatDate(c.date)}</td>
+                                        <td>${c.orderNumber}</td>
+                                        <td style="font-weight:bold;">${c.amount}</td>
+                                        <td><span class="badge">${c.method}</span></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>` : '<p style="padding: 15px;">لا توجد تحصيلات</p>'}
+                </div>
+                
+                <div class="card" style="margin-top: 20px;">
+                    <h3 class="card-title">تفاصيل تركيبات العهدة الإضافية</h3>
+                    ${data.extraInstalled.length > 0 ? `
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>التاريخ</th><th>رقم الطلب الأصلي</th><th>المنتج</th><th>الكمية</th></tr>
+                            </thead>
+                            <tbody>
+                                ${data.extraInstalled.map(t => `
+                                    <tr>
+                                        <td>${formatDate(t.date || t.timestamp)}</td>
+                                        <td>${t.orderNumber || '-'}</td>
+                                        <td>${t.product}</td>
+                                        <td>${t.qty}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>` : '<p style="padding: 15px;">لم يتم بيع عهدة إضافية</p>'}
+                </div>
+            `;
+            container.innerHTML = html;
+        }
+
+        function printDelegateReport() {
+            const element = document.getElementById('delegate-report-content');
+            if (!element || element.innerHTML.trim() === '') {
+                showToast('لا توجد بيانات لطباعتها', 'warning');
+                return;
+            }
+            
+            const delegateName = document.getElementById('report-delegate-select').value;
+            
+            const opt = {
+                margin:       0.5,
+                filename:     `تقرير_المندوب_${delegateName}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true },
+                jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+            };
+
+            showToast('جاري تجهيز ملف PDF...', 'success');
+            html2pdf().set(opt).from(element).save().then(() => {
+                showToast('تم تحميل التقرير بنجاح', 'success');
+            });
+        }
+
+        async function loadSettings() {
+            const container = document.getElementById('users-passwords-content');
+            container.innerHTML = renderLoadingOverlay();
+            
+            const res = await API.get('users');
+            if (!res.ok) {
+                container.innerHTML = `<div style="color: red;">${res.error}</div>`;
+                return;
+            }
+
+            if (!res.data || res.data.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد بيانات مستخدمين');
+                return;
+            }
+
+            const html = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>القسم</th>
+                            <th>رمز الدخول الحالي</th>
+                            <th>تحديث الرمز</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${res.data.map(u => `
+                            <tr>
+                                <td><strong>${u.displayName}</strong></td>
+                                <td><span class="badge" style="background-color:#eee; color:#333; font-size:16px;">${u.username}</span></td>
+                                <td>
+                                    <form onsubmit="handleUpdatePassword(event, '${u.role}')" style="display:flex; gap:10px; align-items:center;">
+                                        <input type="text" id="pwd-${u.role}" class="form-input" placeholder="رمز جديد" required style="width: 120px;">
+                                        <button type="submit" class="btn btn-primary" style="padding: 6px 12px; font-size: 14px;">تحديث</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            container.innerHTML = html;
+            loadRegions();
+            loadDelegatesList();
+        }
+
+        async function handleUpdatePassword(e, role) {
+            e.preventDefault();
+            const newPassword = document.getElementById('pwd-' + role).value;
+            
+            showLoading();
+            const res = await API.post('update_password', { role, newPassword });
+            hideLoading();
+            
+            if (res.ok) {
+                showToast(res.message, 'success');
+                loadSettings();
+            } else {
+                showToast(res.error, 'error');
+            }
+        }
+
+        async function handleAddDelegate(e) {
+            e.preventDefault();
+            const name = document.getElementById('new-delegate-name').value;
+            const region = document.getElementById('new-delegate-region').value;
+            
+            showLoading();
+            const res = await API.post('add_delegate', { name, region });
+            hideLoading();
+            
+            if (res.ok) {
+                showToast(res.message, 'success');
+                loadDelegatesList();
+                document.getElementById('new-delegate-name').value = '';
+                document.getElementById('new-delegate-region').value = '';
+            } else {
+                showToast(res.error, 'error');
+            }
+        }
+
+        async function handleOrderAssignment(e) {
+            e.preventDefault();
+            const orderNumber = document.getElementById('assignment-order-num').value.trim();
+            const items = [];
+            const assignProducts = PRODUCTS.filter(p => p !== 'بارات الومنيوم');
+            assignProducts.forEach((p, i) => {
+                const qty = Number(document.getElementById('assign-qty-' + i).value);
+                if (qty > 0) items.push({ product: p, quantity: qty });
+            });
+            const notes = document.getElementById('assignment-notes').value;
+
+            if (!orderNumber) {
+                showToast('يرجى إدخال رقم الطلبية', 'error');
+                return;
+            }
+            if (items.length === 0) {
+                showToast('يجب تحديد كمية لنوع واحد على الأقل', 'error');
+                return;
+            }
+
+            showLoading();
+            const res = await API.post('order_assignment', { orderNumber, items, notes });
+            hideLoading();
+
+            if (res && res.ok) {
+                showToast(res.message || 'تم إسناد الطلبية بنجاح', 'success');
+                e.target.reset();
+                loadAssignments();
+                loadDashboard();
+            } else {
+                showToast(res?.error || 'حدث خطأ', 'error');
+            }
+        }
+
+        async function loadAssignments() {
+            const container = document.getElementById('assignments-history');
+            if (!container) return;
+            container.innerHTML = renderLoadingOverlay();
+            
+            const res = await API.get('order_assignments');
+            if (!res || !res.ok || !res.data || res.data.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد طلبيات مسندة');
+                return;
+            }
+
+            const html = `
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>التاريخ</th>
+                                <th>رقم الطلبية</th>
+                                <th>المنتج</th>
+                                <th>الكمية</th>
+                                <th>ملاحظات</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${res.data.map(t => `
+                                <tr>
+                                    <td>${formatDate(t.date)}</td>
+                                    <td><strong>${t.orderNumber || '-'}</strong></td>
+                                    <td>${t.product}</td>
+                                    <td>${t.qty}</td>
+                                    <td>${t.notes || '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            container.innerHTML = html;
+        }
+
+        let allFinancialData = [];
+
+        async function loadFinancialTracking() {
+            const container = document.getElementById('financial-tracking-content');
+            container.innerHTML = renderLoadingOverlay();
+            const res = await API.get('financial_all');
+            if (!res || !res.ok) { container.innerHTML = renderEmpty('لا توجد بيانات'); return; }
+            allFinancialData = res.data;
+            
+            const select = document.getElementById('financial-filter');
+            const delegates = [...new Set(allFinancialData.map(d => d.delegate))];
+            select.innerHTML = '<option value="">-- كل المناديب --</option>' + delegates.map(d => `<option value="${d}">${d}</option>`).join('');
+
+            renderFinancialTable(res.data, res.stats);
+        }
+
+        function filterFinancialData() {
+            const filter = document.getElementById('financial-filter').value;
+            const filtered = filter ? allFinancialData.filter(r => r.delegate === filter) : allFinancialData;
+            const stats = {
+                total: filtered.length,
+                totalAmount: filtered.reduce((s,r) => s + r.amount, 0),
+                pendingDist: filtered.filter(r => r.distStatus === 'pending').length,
+                pendingFactory: filtered.filter(r => r.distStatus === 'confirmed' && r.factoryStatus === 'pending').length,
+                completed: filtered.filter(r => r.factoryStatus === 'confirmed').length
+            };
+            renderFinancialTable(filtered, stats);
+        }
+
+        function renderFinancialTable(data, stats) {
+            const container = document.getElementById('financial-tracking-content');
+            
+            let html = `
+                <div class="stats-grid">
+                    <div class="stat-card" style="border-top: 4px solid #2196F3;">
+                        <div class="stat-title">إجمالي المبالغ</div>
+                        <div class="stat-value" style="color: #2196F3;">${formatNumber(stats.totalAmount || 0)}</div>
+                    </div>
+                    <div class="stat-card" style="border-top: 4px solid #4CAF50;">
+                        <div class="stat-title">تم المراجعة بالكامل</div>
+                        <div class="stat-value" style="color: #4CAF50;">${stats.completed || 0}</div>
+                    </div>
+                    <div class="stat-card" style="border-top: 4px solid #FF9800;">
+                        <div class="stat-title">معلق عند الفرز</div>
+                        <div class="stat-value" style="color: #FF9800;">${stats.pendingDist || 0}</div>
+                    </div>
+                    <div class="stat-card" style="border-top: 4px solid #F44336;">
+                        <div class="stat-title">معلق عند المصنع</div>
+                        <div class="stat-value" style="color: #F44336;">${stats.pendingFactory || 0}</div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 20px;">
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>التاريخ</th>
+                                    <th>رقم الطلب</th>
+                                    <th>المندوب</th>
+                                    <th>المبلغ</th>
+                                    <th>النوع</th>
+                                    <th>طريقة الدفع</th>
+                                    <th>حالة الفرز</th>
+                                    <th>حالة المصنع</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.map(r => `
+                                    <tr>
+                                        <td>${formatDate(r.date)}</td>
+                                        <td>${r.orderNumber || '-'}</td>
+                                        <td>${r.delegate || '-'}</td>
+                                        <td style="font-weight:bold;">${r.amount}</td>
+                                        <td>${r.type || '-'}</td>
+                                        <td><span class="badge">${r.payMethod || '-'}</span></td>
+                                        <td>${r.distStatus === 'confirmed' ? `<span class="badge" style="background-color: #e8f5e9; color: #2e7d32;">✅ تم (${r.distReviewer || 'مسؤول الفرز'})</span>` : `<span class="badge" style="background-color: #fff3e0; color: #ef6c00;">⏳ معلق</span>`}</td>
+                                        <td>${r.factoryStatus === 'confirmed' ? `<span class="badge" style="background-color: #e8f5e9; color: #2e7d32;">✅ تم (${r.factoryReviewer || 'المصنع'})</span>` : `<span class="badge" style="background-color: #fff3e0; color: #ef6c00;">⏳ معلق</span>`}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            container.innerHTML = html;
+        }
+
+        async function loadExtraStats() {
+            const container = document.getElementById('extra-stats-content');
+            container.innerHTML = renderLoadingOverlay();
+            const res = await API.get('extra_custody_stats');
+            if (!res || !res.ok) { container.innerHTML = renderEmpty('لا توجد بيانات'); return; }
+            
+            if (!res.data || res.data.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد إحصائيات للعهدة');
+                return;
+            }
+
+            const allProducts = new Set();
+            res.data.forEach(r => {
+                if (r.products) {
+                    Object.keys(r.products).forEach(p => allProducts.add(p));
+                }
+            });
+            const productList = Array.from(allProducts);
+
+            const totals = {};
+            productList.forEach(p => totals[p] = 0);
+            let grandTotal = 0;
+
+            let html = `
+                <div class="card">
+                    <h2 class="card-title">إحصائيات تركيبات العهدة الإضافية</h2>
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>المندوب</th>
+                                    ${productList.map(p => `<th>${p}</th>`).join('')}
+                                    <th>الإجمالي</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${res.data.map(r => {
+                                    let rowHtml = `<tr><td><strong>${r.delegate}</strong></td>`;
+                                    productList.forEach(p => {
+                                        const val = (r.products && r.products[p]) ? r.products[p] : 0;
+                                        totals[p] += val;
+                                        rowHtml += `<td>${val}</td>`;
+                                    });
+                                    grandTotal += r.total || 0;
+                                    rowHtml += `<td style="font-weight:bold;">${r.total || 0}</td></tr>`;
+                                    return rowHtml;
+                                }).join('')}
+                            </tbody>
+                            <tfoot>
+                                <tr style="background-color: #f5f5f5; font-weight: bold;">
+                                    <td>الإجمالي الكلي</td>
+                                    ${productList.map(p => `<td>${totals[p]}</td>`).join('')}
+                                    <td>${grandTotal}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            `;
+            container.innerHTML = html;
+        }
+
+        async function loadRegionCustody() {
+            const rcContainer = document.getElementById('region-custody-content');
+            const usageContainer = document.getElementById('courier-region-usage-content');
+            rcContainer.innerHTML = renderLoadingOverlay();
+            usageContainer.innerHTML = renderLoadingOverlay();
+
+            const [rcRes, usageRes] = await Promise.all([
+                API.get('region_custody_dashboard'),
+                API.get('courier_region_usage')
+            ]);
+
+            if (rcRes && rcRes.ok) {
+                renderRegionCustodyDashboard(rcRes.data);
+            } else {
+                rcContainer.innerHTML = renderEmpty('فشل تحميل بيانات عهدة المناطق');
+            }
+
+            if (usageRes && usageRes.ok) {
+                renderCourierRegionUsage(usageRes.data);
+            } else {
+                usageContainer.innerHTML = renderEmpty('فشل تحميل استهلاك المناديب');
+            }
+        }
+
+        function renderRegionCustodyDashboard(data) {
+            const container = document.getElementById('region-custody-content');
+            if (!data || data.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد مناطق تستخدم هذا النظام حالياً');
+                return;
+            }
+
+            let html = '<div class="custody-dashboard">';
+            data.forEach(regionData => {
+                html += `
+                    <div class="custody-region-card">
+                        <div class="custody-region-header">
+                            <h3><span class="icon">📍</span> منطقة ${regionData.region}</h3>
+                            <div class="region-badge ${regionData.region === 'الغربيه' ? 'west' : 'east'}">
+                                ${regionData.couriersCount} مندوب
+                            </div>
+                        </div>
+                        <div class="custody-region-body">
+                            <div class="custody-stats-row">
+                                <div class="custody-stat info">
+                                    <div class="label">تم استلامه للمنطقة</div>
+                                    <div class="value">${formatNumber(regionData.totalAdded)}</div>
+                                </div>
+                                <div class="custody-stat warning">
+                                    <div class="label">تم تركيبه</div>
+                                    <div class="value">${formatNumber(regionData.totalUsed)}</div>
+                                </div>
+                                <div class="custody-stat success">
+                                    <div class="label">الرصيد الحالي بالمخزن</div>
+                                    <div class="value">${formatNumber(regionData.totalBalance)}</div>
+                                </div>
+                            </div>
+                            
+                            <h4 style="margin: 16px 0 10px; font-size: 0.95rem; color: var(--text-light);">الأرصدة الحالية للمنتجات (بدون البارات):</h4>
+                            ${regionData.productsBalance.map(p => {
+                                const ratio = p.totalAdded > 0 ? (p.balance / p.totalAdded) : 0;
+                                const statusClass = ratio < 0.2 ? 'danger' : (ratio < 0.5 ? 'warning' : 'sufficient');
+                                const statusText = ratio < 0.2 ? 'منخفض جداً' : (ratio < 0.5 ? 'قارب على النفاذ' : 'متوفر');
+                                return `
+                                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #fafafa; border-radius: 8px; margin-bottom: 8px; border: 1px solid #eee;">
+                                        <div style="font-weight: 600;">${p.product}</div>
+                                        <div style="display: flex; align-items: center; gap: 12px;">
+                                            <span style="font-size: 1.1rem; font-weight: 700; color: var(--primary);">${formatNumber(p.balance)}</span>
+                                            <span class="bar-indicator ${statusClass}">${statusText}</span>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function renderCourierRegionUsage(data) {
+            const container = document.getElementById('courier-region-usage-content');
+            if (!data || data.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد بيانات استهلاك');
+                return;
+            }
+
+            let html = '<div class="courier-usage-grid">';
+            data.forEach(item => {
+                const productDetails = Object.entries(item.products)
+                    .filter(([p, qty]) => qty > 0)
+                    .map(([p, qty]) => `${p}: ${qty}`)
+                    .join(' | ');
+                    
+                html += `
+                    <div class="courier-usage-card" title="${productDetails}">
+                        <div class="courier-info">
+                            <div class="courier-name">${item.delegate}</div>
+                            <div class="courier-region">${item.region}</div>
+                        </div>
+                        <div class="usage-count">${item.total} منتج</div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // ==========================================
+        // إدارة المناطق
+        // ==========================================
+
+        async function loadRegions() {
+            const container = document.getElementById('regions-list');
+            if (!container) return;
+            const res = await API.get('regions');
+            if (!res || !res.ok) {
+                container.innerHTML = '<div class="help-box" style="background-color: #ffebee;">خطأ في تحميل المناطق</div>';
+                return;
+            }
+            const regions = res.data || [];
+            
+            // Populate delegate region dropdown
+            const regionSelect = document.getElementById('new-delegate-region');
+            if (regionSelect) {
+                const currentVal = regionSelect.value;
+                regionSelect.innerHTML = '<option value="">-- اختر المنطقة --</option>' + 
+                    regions.filter(r => r.status === 'نشطة').map(r => `<option value="${r.name}">${r.name}</option>`).join('');
+                if (currentVal) regionSelect.value = currentVal;
+            }
+
+            if (regions.length === 0) {
+                container.innerHTML = renderEmpty('لا توجد مناطق مسجلة');
+                return;
+            }
+            container.innerHTML = `
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead><tr><th>المنطقة</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+                        <tbody>
+                            ${regions.map(r => `
+                                <tr>
+                                    <td>${r.name}</td>
+                                    <td><span class="badge ${r.status === 'نشطة' ? 'badge-success' : 'badge-danger'}">${r.status}</span></td>
+                                    <td>
+                                        <button class="btn btn-outline" onclick="toggleRegion(${r.index}, '${r.status === 'نشطة' ? 'معطلة' : 'نشطة'}')" style="padding: 4px 10px; font-size: 0.85em;">
+                                            ${r.status === 'نشطة' ? 'تعطيل' : 'تفعيل'}
+                                        </button>
+                                        <button class="btn btn-danger" onclick="deleteRegion(${r.index}, '${r.name}')" style="padding: 4px 10px; font-size: 0.85em; margin-right: 5px;">حذف</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        async function handleAddRegion(e) {
+            e.preventDefault();
+            const name = document.getElementById('new-region-name').value.trim();
+            if (!name) return showToast('يرجى إدخال اسم المنطقة', 'error');
+            showLoading();
+            const res = await API.post('add_region', { name });
+            hideLoading();
+            if (res && res.ok) {
+                showToast('تمت إضافة المنطقة بنجاح', 'success');
+                document.getElementById('new-region-name').value = '';
+                loadRegions();
+            } else {
+                showToast(res?.error || 'خطأ في إضافة المنطقة', 'error');
+            }
+        }
+
+        async function toggleRegion(index, newStatus) {
+            showLoading();
+            const res = await API.post('toggle_region', { index, status: newStatus });
+            hideLoading();
+            if (res && res.ok) {
+                showToast('تم تحديث حالة المنطقة', 'success');
+                loadRegions();
+            } else {
+                showToast(res?.error || 'خطأ', 'error');
+            }
+        }
+
+        async function deleteRegion(index, name) {
+            if (!confirm('هل أنت متأكد من حذف المنطقة: ' + name + '؟')) return;
+            showLoading();
+            const res = await API.post('delete_region', { index });
+            hideLoading();
+            if (res && res.ok) {
+                showToast('تم حذف المنطقة', 'success');
+                loadRegions();
+            } else {
+                showToast(res?.error || 'خطأ في حذف المنطقة', 'error');
+            }
+        }
+
+        // ==========================================
+        // إدارة المندوبين (مع الحذف)
+        // ==========================================
+
+        async function loadDelegatesList() {
+            const container = document.getElementById('delegates-list');
+            if (!container) return;
+            const res = await API.get('all_couriers');
+            if (!res || !res.ok) {
+                container.innerHTML = '<div class="help-box" style="background-color: #ffebee;">خطأ في تحميل المندوبين</div>';
+                return;
+            }
+            const couriers = res.data || [];
+            if (couriers.length === 0) {
+                container.innerHTML = renderEmpty('لا يوجد مندوبين');
+                return;
+            }
+            container.innerHTML = `
+                <h3 style="margin: 15px 0 10px;">قائمة المندوبين</h3>
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead><tr><th>الاسم</th><th>المنطقة</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+                        <tbody>
+                            ${couriers.map(c => `
+                                <tr style="${c.status === 'محذوف' ? 'opacity: 0.5;' : ''}">
+                                    <td>${c.displayName}</td>
+                                    <td>${c.region}</td>
+                                    <td><span class="badge ${c.status === 'محذوف' ? 'badge-danger' : 'badge-success'}">${c.status || 'نشط'}</span></td>
+                                    <td>
+                                        ${c.status !== 'محذوف' ? `<button class="btn btn-danger" onclick="deleteDelegate('${c.displayName.replace(/'/g, "\\'")}')" style="padding: 4px 10px; font-size: 0.85em;">حذف</button>` : '<span style="color:#999;">محذوف</span>'}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        async function deleteDelegate(name) {
+            if (!confirm('هل أنت متأكد من حذف المندوب: ' + name + '؟\\n\\nسيتم الاحتفاظ بالسجلات التاريخية.')) return;
+            showLoading();
+            const res = await API.post('delete_delegate', { name });
+            hideLoading();
+            if (res && res.ok) {
+                showToast('تم حذف المندوب بنجاح', 'success');
+                loadDelegatesList();
+            } else {
+                showToast(res?.error || 'خطأ في حذف المندوب', 'error');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', renderApp);
+    </script>
+</body>
+</html>
