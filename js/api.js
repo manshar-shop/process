@@ -2,7 +2,7 @@
  * نظام منشر - التواصل مع الباك إند
  */
 
-const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzuDQ2IDcdc-Z1Sez10_sgecn1YGu9A7jadquHIMRVnFhieXCsZooN9IhnAf5FhJnHT/exec';
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyPmlxRLYq1O0pBG4Z8NW0JS1jKwzcCeETCoVQR5hO24C4xSo8ykkgY0EOXnGnx_9X0/exec';
 
 const API = {
   /** إرسال طلب POST */
