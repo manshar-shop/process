@@ -299,7 +299,7 @@
     </header>
 
     <main>
-        <form id="installationForm">
+        <form id="installationForm" novalidate>
             <!-- Delegate Info -->
             <div class="card">
                 <h2 class="section-title">معلومات المندوب</h2>
@@ -482,7 +482,7 @@
                     <h2 class="section-title">تسجيل حالة الطلب</h2>
                     <div class="form-group">
                         <label for="minOrderNumber">رقم الطلب</label>
-                        <input type="text" id="minOrderNumber" placeholder="أدخل رقم الطلب" required>
+                        <input type="text" id="minOrderNumber" placeholder="أدخل رقم الطلب">
                     </div>
                     <button type="button" class="btn-submit" onclick="submitUninstalledOrder()">إرسال حالة الطلب</button>
                 </div>
@@ -662,8 +662,32 @@
             const orderProduct = document.getElementById('orderProduct').value;
             const orderQuantity = document.getElementById('platesCount').value;
 
+            // Manual validation for required fields
+            if (!delegateName) {
+                showToast('يرجى اختيار المندوب', 'error');
+                return;
+            }
+            if (!orderNumber) {
+                showToast('يرجى إدخال رقم الطلب', 'error');
+                return;
+            }
+            if (!orderProduct) {
+                showToast('يرجى اختيار نوع المنشر', 'error');
+                return;
+            }
+            if (!orderQuantity || Number(orderQuantity) <= 0) {
+                showToast('يرجى إدخال الكمية', 'error');
+                return;
+            }
+
+            const paymentChecked = document.querySelector('input[name="paymentStatus"]:checked');
+            if (!paymentChecked) {
+                showToast('يرجى تحديد حالة الدفع', 'error');
+                return;
+            }
+
             // Validate COD
-            const isCOD = document.querySelector('input[name="paymentStatus"]:checked').value === 'تحصيل';
+            const isCOD = paymentChecked.value === 'تحصيل';
             let collectionMethod = '';
             let paymentAmount = '';
             
